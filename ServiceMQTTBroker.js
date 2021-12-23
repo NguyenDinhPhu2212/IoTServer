@@ -1,35 +1,22 @@
 const mqtt = require("mqtt");
 const dbService = require("./ServiceMongoDB.js");
 
-function dateToString(date) {
-    let month = date.getMonth() + 1;
-    let day = date.getDate();
-    let hours = date.getHours();
-    let minutes = date.getMinutes();
-    let seconds = date.getSeconds();
-
-    month = month < 10 ? `0${month}` : month;
-    day = day < 10 ? `0${day}` : day;
-    hours = hours < 10 ? `0${hours}` : hours;
-    minutes = minutes < 10 ? `0${minutes}` : minutes;
-    seconds = seconds < 10 ? `0${seconds}` : seconds;
-
-    return `${date.getFullYear()}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-}
-
-class DHT11 {
+class Sensor {
     constructor(id) {
         this.id = id;
+    }
+    calculateAvg(beforeAvg, numRecords, newValue) {
+        return (beforeAvg * numRecords + newValue) / (numRecords + 1);
+    }
+}
+class DHT11 extends Sensor {
+    constructor(id) {
+        super(id);
         this.avgTemperature = 0;
         this.avgHumidity = 0;
         this.avgPpm = 0;
         this.numberOfRecords = 0;
     }
-
-    calculateAvg(beforeAvg, numRecords, newValue) {
-        return (beforeAvg * numRecords + newValue) / (numRecords + 1);
-    }
-
     update(temperature, humidity, ppm) {
         this.currentTemperature = temperature;
         this.currentHumidity = humidity;
@@ -66,18 +53,95 @@ class DHT11 {
             humidity: this.currentHumidity,
             temperature: this.currentTemperature,
             ppm: this.currentPpm,
-            date: dateToString(new Date()),
+            date: Date.now(),
         };
     }
 }
+class LightSensor extends Sensor {
+    constructor(id) {
+        super(id);
+        this.avgLight = 0;
+        this.numberOfRecords = 0;
+    }
+    update(Light) {
+        this.currentLight = Light;
+        this.avgLight = this.calculateAvg(
+            this.avgLight,
+            this.numberOfRecords,
+            Light
+        );
+        this.numberOfRecords++;
+        //console.log(this.numberOfRecords);
+    }
 
+    toJSON() {
+        return {
+            id: this.id,
+            type: "LightSensor",
+            AQI: this.avgLight,
+        };
+    }
+
+    toJSONCurrent() {
+        return {
+            id: -1,
+            type: "LightSensor",
+            AQI: this.avgLight,
+            date: Date.now(),
+        };
+    }
+}
+class MQ135 extends Sensor {
+    constructor(id) {
+        super(id);
+        this.avgAQI = 0;
+        this.numberOfRecords = 0;
+    }
+
+    calculateAvg(beforeAvg, numRecords, newValue) {
+        return (beforeAvg * numRecords + newValue) / (numRecords + 1);
+    }
+
+    update(AQI) {
+        this.currentAQI = AQI;
+        this.avgAQI = this.calculateAvg(this.avgAQI, this.numberOfRecords, AQI);
+        this.numberOfRecords++;
+        //console.log(this.numberOfRecords);
+    }
+
+    toJSON() {
+        return {
+            id: this.id,
+            type: "MQ135Sensor",
+            AQI: this.avgAQI,
+        };
+    }
+
+    toJSONCurrent() {
+        return {
+            id: -1,
+            type: "MQ135Sensor",
+            AQI: this.avgAQI,
+            date: Date.now(),
+        };
+    }
+}
+const saveData = (collectionName, sensor) => {
+    if (sensor.numberOfRecords >= 300) {
+        dbService.addRecord(collectionName, sensor.toJSON());
+        sensor.numberOfRecords = 0;
+    } else dbService.updateRecord(collectionName, -1, sensor.toJSONCurrent());
+};
 const dht11Topic = "/ESP8266/DHT11/1";
 const mq135Topic = "/ESP8266/MQ135/2";
 const lightSensorTopic = "/ESP8266/LightSensor/3";
 const mq135Collection = "mq135";
-const fifteenMin = 1000 * 60 * 15;
+const dht11Collection = "dht11";
+const lightSensorCollection = "lightSensor";
 
 let dht11 = new DHT11(2);
+let lightSensor = new LightSensor(2);
+let mq135 = new MQ135(2);
 
 const client = mqtt.connect("mqtt://localhost:1883", {
     username: "phu",
@@ -96,11 +160,6 @@ client.on("connect", (ack) => {
     client.subscribe("ESP8266/connection/board", (err) => {});
 
     client.on("message", (topic, message) => {
-        // console.log("============== Data From " + topic +" ===============")
-        // console.log(message.toString());
-        // console.log("===============================================================")
-        // console.log()
-        // console.log()
         var json = undefined;
         try {
             json = JSON.parse(message.toString());
@@ -113,18 +172,15 @@ client.on("connect", (ack) => {
             console.log("Failed!");
             return;
         }
-        console.log(topic);
         if (topic == dht11Topic) {
             dht11.update(json["temperature"], json["humidity"], json["ppm"]);
-            dbService.updateRecord(mq135Collection, -1, dht11.toJSONCurrent());
-            if (mq135.numberOfRecords >= 300) {
-                dbService.addRecord(mq135Collection, dht11.toJSON());
-                mq135.numberOfRecords = 0;
-            }
+            saveData(dht11Collection, dht11);
         } else if (topic == lightSensorTopic) {
-            
-        }else if(topic == mq135Topic){
-            
+            lightSensor.update(json.light);
+            saveData(lightSensorCollection, lightSensor);
+        } else if (topic == mq135Topic) {
+            mq135.update(json.AQI);
+            saveData(mq135Collection, mq135);
         }
     });
 });
