@@ -16,34 +16,32 @@ const getCurrentData = async (dbo, collectionName) => {
         return { error: error.message };
     }
 };
-const getDataByQuery = async (dbo, collectionName, query) => {
+const getDataByQuery = async (
+    dbo,
+    collectionName,
+    idRoom,
+    fromDate,
+    toDate
+) => {
     try {
+        const query = {
+            date: { $gte: Date.parse(fromDate), $lte: Date.parse(toDate) },
+        };
         const response = await dbo
             .collection(collectionName)
             .find(query)
             .toArray();
-
-        let data = [];
-
-        for (let i = 0; i < response.length; i++) {
-            data.push({
-                humidity: response[i].humidity,
-                temperature: response[i].temperature,
-                ppm: response[i].ppm,
-            });
-        }
-
-        data = data.slice(0, -1);
         const result = {
             success: true,
             id_room: idRoom,
             "from-date": fromDate,
             "to-date": toDate,
-            data: [...data],
+            data: [...response],
         };
 
         return { value: result };
     } catch (error) {
+        console.log(error);
         return { error: error.message };
     }
 };
@@ -113,12 +111,15 @@ exports.getEnvironment = function getEnvironment(
         MongoClient.connect(url, async function (err, db) {
             if (err) return;
             var dbo = db.db(dbName);
-            var query = {
-                date: { $gte: Date.parse(fromDate), $lte: Date.parse(toDate) },
-            };
             // get Data of mq135
             const { error: mq135Error, value: mq135Data } =
-                await getCurrentData(dbo, mq135Collection);
+                await getDataByQuery(
+                    dbo,
+                    mq135Collection,
+                    idRoom,
+                    fromDate,
+                    toDate
+                );
             if (mq135Error) {
                 response.send(failMes);
                 db.close();
@@ -126,7 +127,13 @@ exports.getEnvironment = function getEnvironment(
             }
             // get data of dht11
             const { error: dht11Error, value: dht11Data } =
-                await getCurrentData(dbo, dht11Collection);
+                await getDataByQuery(
+                    dbo,
+                    dht11Collection,
+                    idRoom,
+                    fromDate,
+                    toDate
+                );
             if (dht11Error) {
                 response.send(failMes);
                 db.close();
@@ -134,7 +141,13 @@ exports.getEnvironment = function getEnvironment(
             }
             // get data of light sensor
             const { error: lightSensorError, value: lightSensorData } =
-                await getCurrentData(dbo, lightSensorCollection);
+                await getDataByQuery(
+                    dbo,
+                    lightSensorCollection,
+                    idRoom,
+                    fromDate,
+                    toDate
+                );
             if (lightSensorError) {
                 response.send(failMes);
                 db.close();
@@ -179,7 +192,6 @@ exports.updateRecord = function updateRecord(collectionName, id, jsonValue) {
                 newValue,
                 function (err, res) {
                     if (err) throw err;
-                    console.log(res);
 
                     db.close();
                 }

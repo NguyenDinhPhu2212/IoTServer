@@ -14,13 +14,11 @@ class DHT11 extends Sensor {
         super(id);
         this.avgTemperature = 0;
         this.avgHumidity = 0;
-        this.avgPpm = 0;
         this.numberOfRecords = 0;
     }
-    update(temperature, humidity, ppm) {
+    update(temperature, humidity) {
         this.currentTemperature = temperature;
         this.currentHumidity = humidity;
-        this.currentPpm = ppm;
         this.avgTemperature = this.calculateAvg(
             this.avgTemperature,
             this.numberOfRecords,
@@ -31,7 +29,6 @@ class DHT11 extends Sensor {
             this.numberOfRecords,
             humidity
         );
-        this.avgPpm = this.calculateAvg(this.avgPpm, this.numberOfRecords, ppm);
         this.numberOfRecords++;
         //console.log(this.numberOfRecords);
     }
@@ -42,7 +39,6 @@ class DHT11 extends Sensor {
             type: "DHT11Sensor",
             humidity: this.avgHumidity,
             temperature: this.avgTemperature,
-            ppm: this.avgPpm,
         };
     }
 
@@ -52,7 +48,6 @@ class DHT11 extends Sensor {
             type: "DHT11Sensor",
             humidity: this.currentHumidity,
             temperature: this.currentTemperature,
-            ppm: this.currentPpm,
             date: Date.now(),
         };
     }
@@ -173,7 +168,7 @@ client.on("connect", (ack) => {
             return;
         }
         if (topic == dht11Topic) {
-            dht11.update(json["temperature"], json["humidity"], json["ppm"]);
+            dht11.update(json["temperature"], json["humidity"]);
             saveData(dht11Collection, dht11);
         } else if (topic == lightSensorTopic) {
             lightSensor.update(json.light);
